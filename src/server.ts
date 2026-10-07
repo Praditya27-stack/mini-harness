@@ -58,26 +58,19 @@ const server = http.createServer((req, res) => {
         }
 
         const sendSSE = (event: string, data: any) => {
-          res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+          if (!res.destroyed && res.writable) {
+            res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+          }
         };
 
         const engine = new ReActEngine([fsReaderSkill, shellExecSkill]);
-        
-        // Handle client disconnect gracefully
-        let aborted = false;
-        req.on('close', () => {
-          aborted = true;
-          console.log('[Server] Client disconnected, aborting task stream...');
-        });
 
-        // Run the task
+        // Run the task and stream all events
         await engine.run(body.task, (event) => {
-          if (!aborted) {
-            sendSSE(event.type, event.data);
-          }
+          sendSSE(event.type, event.data);
         });
 
-        if (!aborted) {
+        if (!res.destroyed && res.writable) {
           res.end();
         }
       } catch (err: any) {
