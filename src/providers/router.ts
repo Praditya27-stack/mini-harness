@@ -46,6 +46,7 @@ export class RouterProvider {
       tools,
       tool_choice: tools ? "auto" : undefined,
       temperature: 0.2, // Temperatur rendah agar deterministik dalam memilih tools
+      stream: false, // Wajib di-set false karena 9router default ke stream SSE!
     };
 
     const response = await fetch(endpoint, {
