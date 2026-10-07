@@ -1,5 +1,5 @@
 import { RouterProvider } from '../providers/router.js';
-import type { ChatMessage, ReActStep, RunResult, Skill } from './types.js';
+import type { ChatMessage, ReActStep, RunResult, Skill, EngineEvent, EngineEventHandler, EngineEventType } from './types.js';
 
 /**
  * ANSI Color Palette untuk konsol terminal (Zero external dependencies).
@@ -20,6 +20,7 @@ const colors = {
 export interface EngineOptions {
   maxSteps?: number;
   routerProvider?: RouterProvider;
+  onEvent?: EngineEventHandler;
 }
 
 /**
@@ -29,6 +30,7 @@ export class ReActEngine {
   private skills: Map<string, Skill> = new Map();
   private maxSteps: number;
   private router: RouterProvider;
+  private onEvent?: EngineEventHandler;
 
   constructor(skills: Skill[] = [], options: EngineOptions = {}) {
     for (const skill of skills) {
@@ -36,6 +38,7 @@ export class ReActEngine {
     }
     this.maxSteps = options.maxSteps ?? parseInt(process.env.MAX_STEPS || '6', 10);
     this.router = options.routerProvider ?? new RouterProvider();
+    this.onEvent = options.onEvent;
   }
 
   /**
@@ -64,7 +67,15 @@ export class ReActEngine {
   /**
    * Menjalankan ReAct loop untuk menyelesaikan task tertentu.
    */
-  async run(task: string): Promise<RunResult> {
+  async run(task: string, onEventCallback?: EngineEventHandler): Promise<RunResult> {
+    const emit = (type: EngineEventType, data: any) => {
+      const event: EngineEvent = { type, data, timestamp: Date.now() };
+      if (onEventCallback) onEventCallback(event);
+      if (this.onEvent) this.onEvent(event);
+    };
+
+    emit('start', { task, maxSteps: this.maxSteps });
+
     const steps: ReActStep[] = [];
     const messages: ChatMessage[] = [
       {
@@ -85,13 +96,22 @@ export class ReActEngine {
     const skillsList = Array.from(this.skills.values());
 
     for (let currentStep = 1; currentStep <= this.maxSteps; currentStep++) {
+      emit('step', { currentStep, maxSteps: this.maxSteps });
       console.log(`${colors.dim}--- [Loop Step ${currentStep} of ${this.maxSteps}] ---${colors.reset}`);
 
-      const response = await this.router.chatCompletion(messages, skillsList);
+      let response;
+      try {
+        response = await this.router.chatCompletion(messages, skillsList);
+      } catch (err: any) {
+        emit('error', { message: err.message, step: currentStep });
+        throw err;
+      }
+
       const { content, toolCalls, rawMessage } = response;
 
       // 1. Tampilkan THINKING jika LLM memberikan penalaran teks bersamaan dengan tool calls
       if (content && toolCalls && toolCalls.length > 0) {
+        emit('thinking', { step: currentStep, content });
         console.log(`${colors.cyan}${colors.bold}[THINKING]${colors.reset} ${content}`);
       }
 
@@ -100,6 +120,8 @@ export class ReActEngine {
         messages.push(rawMessage);
 
         for (const toolCall of toolCalls) {
+          emit('action', { step: currentStep, tool: toolCall.name, arguments: toolCall.arguments, id: toolCall.id });
+          
           const skill = this.skills.get(toolCall.name);
           const stepRecord: ReActStep = {
             step: currentStep,
@@ -125,6 +147,8 @@ export class ReActEngine {
 
           stepRecord.observation = observation;
           steps.push(stepRecord);
+          
+          emit('observation', { step: currentStep, tool: toolCall.name, observation });
 
           // Cuplikan log observation agar rapi di layar
           const previewObs = observation.length > 350
@@ -144,26 +168,32 @@ export class ReActEngine {
       } else {
         // 3. Jika model tidak memanggil tools lagi -> FINAL ANSWER
         const finalAnswer = content || '(Tidak ada konten jawaban yang dihasilkan oleh model)';
+        emit('final_answer', { step: currentStep, answer: finalAnswer });
         console.log(`${colors.green}${colors.bold}[FINAL ANSWER]${colors.reset}\n${finalAnswer}\n`);
 
-        return {
+        const result: RunResult = {
           task,
           finalAnswer,
           steps,
           success: true,
           totalSteps: currentStep,
         };
+        emit('done', result);
+        return result;
       }
     }
 
     // 4. Jika menyentuh MAX_STEPS tanpa jawaban final
     console.log(`${colors.red}${colors.bold}[LIMIT EXCEEDED]${colors.reset} Runtime mencapai batas ${this.maxSteps} langkah sebelum selesai.\n`);
-    return {
+    const failedResult: RunResult = {
       task,
       finalAnswer: 'Eksekusi dihentikan: Mencapai batas MAX_STEPS sebelum task terselesaikan secara utuh.',
       steps,
       success: false,
       totalSteps: this.maxSteps,
     };
+    emit('error', { message: 'Max steps exceeded', result: failedResult });
+    emit('done', failedResult);
+    return failedResult;
   }
 }

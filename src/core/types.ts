@@ -86,3 +86,24 @@ export interface RouterChatResponse {
   toolCalls?: ToolCallItem[];
   rawMessage: ChatMessage;
 }
+
+/**
+ * Tipe event yang dipancarkan selama eksekusi ReAct Loop.
+ */
+export type EngineEventType =
+  | 'start'
+  | 'step'
+  | 'thinking'
+  | 'action'
+  | 'observation'
+  | 'final_answer'
+  | 'error'
+  | 'done';
+
+export interface EngineEvent {
+  type: EngineEventType;
+  data: any;
+  timestamp: number;
+}
+
+export type EngineEventHandler = (event: EngineEvent) => void;
