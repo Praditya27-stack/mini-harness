@@ -5,9 +5,8 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "start": "tsx src/server.ts",
-    "cli": "tsx src/index.ts",
-    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
     "build": "tsc"
   },
   "keywords": [
